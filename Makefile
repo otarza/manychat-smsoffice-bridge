@@ -4,8 +4,13 @@ REGION ?= europe-west1
 LOG_FILTER_ALL = resource.type="cloud_run_revision" AND (resource.labels.service_name="send-sms" OR resource.labels.service_name="sms-callback")
 LOG_FILTER_SEND_RESULTS = resource.type="cloud_run_revision" AND resource.labels.service_name="send-sms" AND jsonPayload.event="send_result"
 LOG_FILTER_SEND_FAILURES = resource.type="cloud_run_revision" AND resource.labels.service_name="send-sms" AND (jsonPayload.event="send_exception" OR jsonPayload.event="send_validation_failed" OR jsonPayload.success=false)
+LOG_FILTER_BROADCAST = resource.type="cloud_run_revision" AND ((resource.labels.service_name="send-sms" AND (jsonPayload.event="send_result" OR jsonPayload.event="send_exception" OR jsonPayload.event="send_validation_failed")) OR (resource.labels.service_name="sms-callback" AND jsonPayload.event="delivery_callback"))
 
-.PHONY: help install test lint run deploy logs-send logs-callback logs-tail logs-results logs-failures clean
+LOG_FORMAT_RESULTS = table(timestamp,jsonPayload.reference,jsonPayload.destination_masked,jsonPayload.success,jsonPayload.error_code,jsonPayload.message)
+LOG_FORMAT_FAILURES = table(timestamp,jsonPayload.event,jsonPayload.reference,jsonPayload.destination_masked,jsonPayload.error,jsonPayload.error_code,jsonPayload.message)
+LOG_FORMAT_BROADCAST = table(timestamp,resource.labels.service_name,jsonPayload.event,jsonPayload.reference,jsonPayload.destination_masked,jsonPayload.success,jsonPayload.error_code,jsonPayload.status,jsonPayload.message,jsonPayload.error)
+
+.PHONY: help install test lint run deploy logs-send logs-callback logs-tail logs-broadcast-tail logs-results-tail logs-failures-tail logs-results logs-failures clean
 
 help:
 	@echo "Available commands:"
@@ -16,6 +21,9 @@ help:
 	@echo "  make run-cb    Run sms_callback locally on http://localhost:8081"
 	@echo "  make deploy    Deploy both functions to GCP"
 	@echo "  make logs-tail Watch live send/callback logs (requires gcloud beta logging tail)"
+	@echo "  make logs-broadcast-tail Watch live broadcast send/callback table"
+	@echo "  make logs-results-tail Watch live send results table"
+	@echo "  make logs-failures-tail Watch live send failures table"
 	@echo "  make logs-results Show latest send results"
 	@echo "  make logs-failures Show latest send failures"
 	@echo "  make clean     Remove caches"
@@ -48,11 +56,20 @@ logs-callback:
 logs-tail:
 	gcloud beta logging tail '$(LOG_FILTER_ALL)' --project="$(PROJECT_ID)"
 
+logs-broadcast-tail:
+	gcloud beta logging tail '$(LOG_FILTER_BROADCAST)' --project="$(PROJECT_ID)" --format='$(LOG_FORMAT_BROADCAST)'
+
+logs-results-tail:
+	gcloud beta logging tail '$(LOG_FILTER_SEND_RESULTS)' --project="$(PROJECT_ID)" --format='$(LOG_FORMAT_RESULTS)'
+
+logs-failures-tail:
+	gcloud beta logging tail '$(LOG_FILTER_SEND_FAILURES)' --project="$(PROJECT_ID)" --format='$(LOG_FORMAT_FAILURES)'
+
 logs-results:
-	gcloud logging read '$(LOG_FILTER_SEND_RESULTS)' --project="$(PROJECT_ID)" --limit=100 --format='table(timestamp,jsonPayload.reference,jsonPayload.destination_masked,jsonPayload.success,jsonPayload.error_code,jsonPayload.message)'
+	gcloud logging read '$(LOG_FILTER_SEND_RESULTS)' --project="$(PROJECT_ID)" --limit=100 --format='$(LOG_FORMAT_RESULTS)'
 
 logs-failures:
-	gcloud logging read '$(LOG_FILTER_SEND_FAILURES)' --project="$(PROJECT_ID)" --limit=100 --format='table(timestamp,jsonPayload.event,jsonPayload.reference,jsonPayload.destination_masked,jsonPayload.error,jsonPayload.error_code,jsonPayload.message)'
+	gcloud logging read '$(LOG_FILTER_SEND_FAILURES)' --project="$(PROJECT_ID)" --limit=100 --format='$(LOG_FORMAT_FAILURES)'
 
 clean:
 	rm -rf .pytest_cache .ruff_cache __pycache__ tests/__pycache__

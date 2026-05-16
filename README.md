@@ -224,6 +224,18 @@ Watch logs live while sending a broadcast:
 PROJECT_ID=manychat-smsoffice-bridge-otar REGION=europe-west1 make logs-tail
 ```
 
+Watch a compact live broadcast table:
+
+```bash
+PROJECT_ID=manychat-smsoffice-bridge-otar REGION=europe-west1 make logs-broadcast-tail
+```
+
+Watch only live send results as a table:
+
+```bash
+PROJECT_ID=manychat-smsoffice-bridge-otar REGION=europe-west1 make logs-results-tail
+```
+
 Show latest send results:
 
 ```bash

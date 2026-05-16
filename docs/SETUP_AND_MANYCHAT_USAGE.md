@@ -615,6 +615,26 @@ Watch live logs while sending a broadcast:
 PROJECT_ID=manychat-smsoffice-bridge-otar REGION=europe-west1 make logs-tail
 ```
 
+The raw JSON live tail is complete, but it can be noisy. For live broadcast monitoring, this compact table is easier to read:
+
+```bash
+PROJECT_ID=manychat-smsoffice-bridge-otar REGION=europe-west1 make logs-broadcast-tail
+```
+
+This includes send results, send failures, validation failures, and delivery callbacks in one table.
+
+Watch only live send results:
+
+```bash
+PROJECT_ID=manychat-smsoffice-bridge-otar REGION=europe-west1 make logs-results-tail
+```
+
+Watch only live failures:
+
+```bash
+PROJECT_ID=manychat-smsoffice-bridge-otar REGION=europe-west1 make logs-failures-tail
+```
+
 This uses:
 
 ```bash
@@ -665,7 +685,7 @@ Recommended Google Cloud setup:
 During a 500-contact broadcast, keep one terminal open with:
 
 ```bash
-make logs-tail
+make logs-broadcast-tail
 ```
 
 And another terminal for summarized results:

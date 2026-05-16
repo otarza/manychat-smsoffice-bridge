@@ -12,6 +12,8 @@ make run        # serve send_sms on http://localhost:8080 (requires .env)
 make run-cb     # serve sms_callback on http://localhost:8081
 make deploy     # ./deploy.sh — deploys both Cloud Functions to GCP
 make logs-tail  # watch live send/callback logs
+make logs-broadcast-tail # watch live broadcast table
+make logs-results-tail # watch live send results table
 make logs-results  # show latest send results
 make logs-failures # show latest send failures
 ```
