@@ -5,6 +5,7 @@
 .gitignore
 .gcloudignore
 .DS_Store
+gha-creds-*.json
 
 tests/
 *.test.py

@@ -68,12 +68,16 @@ curl -X POST http://localhost:8080 \
   }'
 ```
 
-## Deployment
+## Deployment With GitHub Actions
 
-One-time GCP setup:
+Recommended path: do the one-time Google Cloud bootstrap locally, then every push to `master` deploys automatically through GitHub Actions.
 
 ```bash
 PROJECT_ID=your-project-id
+REPO=otarza/manychat-smsoffice-bridge
+REGION=europe-west1
+SMSOFFICE_SENDER=YourApprovedSender
+
 gcloud config set project $PROJECT_ID
 
 gcloud services enable \
@@ -89,13 +93,84 @@ echo -n "YOUR_SMSOFFICE_KEY" | gcloud secrets create smsoffice-key --data-file=-
 openssl rand -hex 32 | tr -d '\n' | gcloud secrets create manychat-secret --data-file=-
 ```
 
-Then deploy:
+Create a deployer service account for GitHub Actions:
 
 ```bash
-make deploy
+DEPLOY_SA="github-actions-deployer@${PROJECT_ID}.iam.gserviceaccount.com"
+
+gcloud iam service-accounts create github-actions-deployer \
+  --display-name="GitHub Actions deployer"
+
+for role in \
+  roles/cloudfunctions.admin \
+  roles/run.admin \
+  roles/iam.serviceAccountAdmin \
+  roles/iam.serviceAccountUser \
+  roles/secretmanager.admin \
+  roles/artifactregistry.admin \
+  roles/cloudbuild.builds.editor \
+  roles/serviceusage.serviceUsageConsumer
+do
+  gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+    --member="serviceAccount:${DEPLOY_SA}" \
+    --role="$role"
+done
 ```
 
-This deploys two Cloud Functions, `send-sms` and `sms-callback`. The script creates separate runtime service accounts, grants Secret Manager access only to `send-sms`, sets minimum instances to zero, and prints both URLs at the end.
+Set up GitHub OIDC / Workload Identity Federation so GitHub Actions can deploy without a long-lived JSON key:
+
+```bash
+PROJECT_NUMBER=$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')
+
+gcloud iam workload-identity-pools create github \
+  --project="$PROJECT_ID" \
+  --location="global" \
+  --display-name="GitHub Actions"
+
+gcloud iam workload-identity-pools providers create-oidc github \
+  --project="$PROJECT_ID" \
+  --location="global" \
+  --workload-identity-pool="github" \
+  --display-name="GitHub Actions provider" \
+  --issuer-uri="https://token.actions.githubusercontent.com" \
+  --attribute-mapping="google.subject=assertion.sub,attribute.actor=assertion.actor,attribute.repository=assertion.repository,attribute.ref=assertion.ref" \
+  --attribute-condition="assertion.repository=='${REPO}' && assertion.ref=='refs/heads/master'"
+
+gcloud iam service-accounts add-iam-policy-binding "$DEPLOY_SA" \
+  --project="$PROJECT_ID" \
+  --role="roles/iam.workloadIdentityUser" \
+  --member="principal://iam.googleapis.com/projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/github/subject/repo:${REPO}:ref:refs/heads/master"
+```
+
+Add these GitHub repository variables under **Settings → Secrets and variables → Actions → Variables**:
+
+| Variable | Value |
+|---|---|
+| `GCP_PROJECT_ID` | your Google Cloud project ID |
+| `GCP_REGION` | `europe-west1` |
+| `GCP_WIF_PROVIDER` | `projects/PROJECT_NUMBER/locations/global/workloadIdentityPools/github/providers/github` |
+| `GCP_DEPLOY_SERVICE_ACCOUNT` | `github-actions-deployer@PROJECT_ID.iam.gserviceaccount.com` |
+| `SMSOFFICE_SENDER` | your approved smsoffice sender |
+| `MAX_INSTANCES` | `5` |
+
+If you use GitHub CLI, you can set them with:
+
+```bash
+gh variable set GCP_PROJECT_ID --body "$PROJECT_ID"
+gh variable set GCP_REGION --body "$REGION"
+gh variable set GCP_WIF_PROVIDER --body "projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/github/providers/github"
+gh variable set GCP_DEPLOY_SERVICE_ACCOUNT --body "$DEPLOY_SA"
+gh variable set SMSOFFICE_SENDER --body "$SMSOFFICE_SENDER"
+gh variable set MAX_INSTANCES --body "5"
+```
+
+After that, push to `master` or run **Actions → Deploy → Run workflow**. The workflow runs Ruff and pytest first, then deploys two Cloud Functions: `send-sms` and `sms-callback`. The deploy script creates separate runtime service accounts, grants Secret Manager access only to `send-sms`, sets minimum instances to zero, and prints both URLs in the action log.
+
+Manual deployment still works from a logged-in machine:
+
+```bash
+SMSOFFICE_SENDER=YourApprovedSender make deploy
+```
 
 To retrieve the ManyChat shared secret (you need it for the ManyChat config):
 

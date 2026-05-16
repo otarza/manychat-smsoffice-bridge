@@ -51,5 +51,6 @@ htmlcov/
 
 # GCP
 .gcloud/
+gha-creds-*.json
 service-account*.json
 credentials.json

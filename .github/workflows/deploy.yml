@@ -1,0 +1,64 @@
+name: Deploy
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    env:
+      PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      REGION: ${{ vars.GCP_REGION || 'europe-west1' }}
+      SMSOFFICE_SENDER: ${{ vars.SMSOFFICE_SENDER }}
+      MAX_INSTANCES: ${{ vars.MAX_INSTANCES || '5' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate deployment configuration
+        run: |
+          test -n "${PROJECT_ID}" || (echo "Missing repository variable GCP_PROJECT_ID" && exit 1)
+          test -n "${SMSOFFICE_SENDER}" || (echo "Missing repository variable SMSOFFICE_SENDER" && exit 1)
+          test -n "${{ vars.GCP_WIF_PROVIDER }}" || (echo "Missing repository variable GCP_WIF_PROVIDER" && exit 1)
+          test -n "${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}" || (echo "Missing repository variable GCP_DEPLOY_SERVICE_ACCOUNT" && exit 1)
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Lint
+        run: python -m ruff check .
+
+      - name: Test
+        run: python -m pytest tests/ -v
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v3
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+          version: ">= 416.0.0"
+
+      - name: Deploy Cloud Functions
+        run: ./deploy.sh
