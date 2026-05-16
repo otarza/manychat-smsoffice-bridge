@@ -17,15 +17,14 @@ test:
 	python -m pytest tests/ -v
 
 lint:
-	ruff check .
+	python -m ruff check .
 
 run:
 	@test -f .env && export $$(grep -v '^#' .env | xargs) && \
-		functions-framework --target=send_sms --debug --port=8080
+		python -m functions_framework --target=send_sms --debug --port=8080
 
 run-cb:
-	@test -f .env && export $$(grep -v '^#' .env | xargs) && \
-		functions-framework --target=sms_callback --debug --port=8081
+	python -m functions_framework --target=sms_callback --debug --port=8081
 
 deploy:
 	./deploy.sh

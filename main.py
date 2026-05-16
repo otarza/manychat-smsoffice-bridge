@@ -8,6 +8,8 @@ from the same source:
 
 Both are pure HTTP handlers using functions_framework.
 """
+import hashlib
+import hmac
 import json
 import logging
 import os
@@ -29,11 +31,11 @@ log = logging.getLogger("smsoffice-bridge")
 
 # ---- Configuration --------------------------------------------------------
 
-SMSOFFICE_API_KEY = os.environ["SMSOFFICE_API_KEY"]
-SMSOFFICE_SENDER = os.environ.get("SMSOFFICE_SENDER", "BitCamp")
-MANYCHAT_SHARED_SECRET = os.environ["MANYCHAT_SHARED_SECRET"]
+SMSOFFICE_CONTENT_MAX_CHARS = 1000
+SMSOFFICE_REFERENCE_MAX_BYTES = 20
+SMSOFFICE_TIMEOUT_SECONDS = 8.0
 
-_client = SmsOfficeClient(api_key=SMSOFFICE_API_KEY, sender=SMSOFFICE_SENDER)
+_client = None
 
 
 # ---- Helpers --------------------------------------------------------------
@@ -47,11 +49,46 @@ def _json(payload: dict, status: int = 200) -> Tuple[str, int, dict]:
 
 
 def _authorized(request: Request) -> bool:
-    """Constant-time-ish check of the shared secret header."""
+    """Constant-time check of the shared secret header."""
     token = request.headers.get("X-Auth-Token", "")
-    # Python string == is not constant-time, but for a 256-bit random token
-    # the timing channel is negligible at this scale.
-    return token == MANYCHAT_SHARED_SECRET
+    expected = os.environ["MANYCHAT_SHARED_SECRET"]
+    return hmac.compare_digest(token.encode(), expected.encode())
+
+
+def _parse_bool(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return False
+
+
+def _sms_reference(reference: str | None) -> str | None:
+    """Fit ManyChat references into smsoffice's 20-byte callback label limit."""
+    if not reference:
+        return None
+    encoded = reference.encode("utf-8")
+    if len(encoded) <= SMSOFFICE_REFERENCE_MAX_BYTES:
+        return reference
+    return hashlib.sha256(encoded).hexdigest()[:SMSOFFICE_REFERENCE_MAX_BYTES]
+
+
+def _sms_timeout() -> float:
+    return float(os.environ.get("SMSOFFICE_TIMEOUT_SECONDS", SMSOFFICE_TIMEOUT_SECONDS))
+
+
+def _sms_client() -> SmsOfficeClient:
+    """Lazily initialize the smsoffice client for send_sms only."""
+    global _client
+    if _client is None:
+        _client = SmsOfficeClient(
+            api_key=os.environ["SMSOFFICE_API_KEY"],
+            sender=os.environ.get("SMSOFFICE_SENDER", "BitCamp"),
+            timeout=_sms_timeout(),
+        )
+    return _client
 
 
 # ---- send_sms -------------------------------------------------------------
@@ -86,11 +123,28 @@ def send_sms(request: Request):
     raw_phone = (data.get("phone") or "").strip()
     content = (data.get("content") or "").strip()
     reference = (data.get("reference") or "").strip() or None
-    urgent = bool(data.get("urgent", False))
+    urgent = _parse_bool(data.get("urgent", False))
 
     if not raw_phone or not content:
         return _json(
-            {"success": False, "error": "phone and content are required"}, 400
+            {
+                "success": False,
+                "error": "missing_required_field",
+                "error_code": None,
+                "message": "phone and content are required",
+            }
+        )
+
+    if len(content) > SMSOFFICE_CONTENT_MAX_CHARS:
+        return _json(
+            {
+                "success": False,
+                "error": "content_too_long",
+                "error_code": None,
+                "message": (
+                    f"content exceeds {SMSOFFICE_CONTENT_MAX_CHARS} character limit"
+                ),
+            }
         )
 
     try:
@@ -98,34 +152,54 @@ def send_sms(request: Request):
     except InvalidPhoneError as e:
         log.info("Phone normalization failed: %s", e)
         return _json(
-            {"success": False, "error": "invalid_phone", "detail": str(e)}, 400
+            {
+                "success": False,
+                "error": "invalid_phone",
+                "error_code": None,
+                "message": "invalid phone",
+                "detail": str(e),
+            }
         )
+
+    api_reference = _sms_reference(reference)
 
     log.info(
         "Sending SMS",
-        extra={"destination": destination, "reference": reference, "len": len(content)},
+        extra={
+            "destination": destination,
+            "reference": api_reference,
+            "len": len(content),
+        },
     )
 
     try:
-        result = _client.send(
+        result = _sms_client().send(
             destination=destination,
             content=content,
-            reference=reference,
+            reference=api_reference,
             urgent=urgent,
         )
     except SmsOfficeError as e:
         log.error("smsoffice error: %s", e)
-        return _json({"success": False, "error": str(e)}, 502)
+        return _json(
+            {
+                "success": False,
+                "error": "smsoffice_error",
+                "error_code": e.error_code,
+                "message": str(e),
+                "destination": destination,
+                "reference": api_reference,
+            }
+        )
 
-    response_status = 200 if result.success else 502
     return _json(
         {
             "success": result.success,
             "error_code": result.error_code,
             "message": result.message,
             "destination": destination,
+            "reference": api_reference,
         },
-        response_status,
     )
 
 

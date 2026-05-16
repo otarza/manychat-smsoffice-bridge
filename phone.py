@@ -8,7 +8,7 @@ import re
 
 GEORGIA_COUNTRY_CODE = "995"
 # Georgian mobile numbers: 9 digits after country code, starting with 5
-GEORGIAN_MOBILE_PATTERN = re.compile(r"^995[5]\d{8}$")
+GEORGIAN_MOBILE_PATTERN = re.compile(r"^9955\d{8}$")
 
 
 class InvalidPhoneError(ValueError):

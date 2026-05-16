@@ -23,12 +23,16 @@ ManyChat External Request
 
 - Normalizes Georgian phone numbers from ManyChat's E.164 format (`+995577123456`) to smsoffice format (`995577123456`).
 - Authenticates ManyChat requests with a shared secret header.
-- Maps smsoffice error codes into a flat JSON response ManyChat can branch on.
+- Maps smsoffice and validation failures into HTTP 200 JSON responses ManyChat can branch on.
 - Receives delivery callbacks from smsoffice (logged to Cloud Logging by default).
 
 ## Cost
 
-Designed to stay on the [Cloud Functions 2nd gen free tier](https://cloud.google.com/functions/pricing): 2M invocations and 400k GB-seconds per month. At typical Messenger-funnel volumes this runs at **$0/month**. Secret Manager free tier (6 active secret versions, 10k access ops/month) is also sufficient.
+Designed for [Cloud Run functions](https://cloud.google.com/functions/pricing) / Cloud Functions 2nd gen request-based billing. The current [Cloud Run pricing](https://cloud.google.com/run/pricing) free tier includes 2M requests, 180k vCPU-seconds, and 360k GiB-seconds per month on Tier 1 pricing. This project uses request-time compute only, 256Mi memory, zero minimum instances, and a small max instance cap by default.
+
+Secret Manager's free tier currently covers 6 active secret versions and 10k access operations per month. Cloud Build currently includes 2,500 free build-minutes per month, and Artifact Registry storage is free up to 0.5 GB. Keep old function images cleaned up and avoid enabling paid vulnerability scanning if the goal is near-$0 operation.
+
+Tiny charges are still possible for outbound internet data transfer, usage above free limits, or SMS messages themselves. The code path is intentionally small enough that typical Messenger-funnel traffic should stay inside the serverless free-tier allowances.
 
 ## Prerequisites
 
@@ -48,6 +52,7 @@ cp .env.example .env
 make install
 make test
 make run    # serves send_sms on http://localhost:8080
+make run-cb # serves sms_callback on http://localhost:8081, no .env required
 ```
 
 Test locally:
@@ -76,20 +81,12 @@ gcloud services enable \
   cloudbuild.googleapis.com \
   run.googleapis.com \
   secretmanager.googleapis.com \
+  iam.googleapis.com \
   artifactregistry.googleapis.com
 
 # Store secrets
 echo -n "YOUR_SMSOFFICE_KEY" | gcloud secrets create smsoffice-key --data-file=-
 openssl rand -hex 32 | tr -d '\n' | gcloud secrets create manychat-secret --data-file=-
-
-# Grant the compute default service account read access to the secrets
-PROJECT_NUMBER=$(gcloud projects describe $PROJECT_ID --format='value(projectNumber)')
-SA="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
-for s in smsoffice-key manychat-secret; do
-  gcloud secrets add-iam-policy-binding $s \
-    --member="serviceAccount:${SA}" \
-    --role="roles/secretmanager.secretAccessor"
-done
 ```
 
 Then deploy:
@@ -98,7 +95,7 @@ Then deploy:
 make deploy
 ```
 
-This deploys two Cloud Functions, `send-sms` and `sms-callback`. Their URLs print at the end — save them.
+This deploys two Cloud Functions, `send-sms` and `sms-callback`. The script creates separate runtime service accounts, grants Secret Manager access only to `send-sms`, sets minimum instances to zero, and prints both URLs at the end.
 
 To retrieve the ManyChat shared secret (you need it for the ManyChat config):
 
@@ -135,14 +132,20 @@ Body:
 | `success` | `sms_success` | Boolean |
 | `error_code` | `sms_error_code` | Number |
 | `message` | `sms_message` | Text |
+| `error` | `sms_error` | Text |
+| `reference` | `sms_reference` | Text |
+
+ManyChat only maps response values reliably when the request returns `200 OK`, so authorized `send_sms` requests return `200` even for validation errors, smsoffice business errors, and smsoffice transport errors. Use `success` as the flow branch condition.
 
 ## smsoffice callback (delivery receipts)
 
 In your smsoffice.ge profile, set the callback URL to the `sms-callback` function URL from the deploy output. smsoffice will GET it with `reference`, `status`, `destination`, `timestamp`, `operator`. The function logs them to Cloud Logging; to persist them, edit `sms_callback` in `main.py` to write to Firestore / BigQuery / Sheets.
 
+smsoffice limits `reference` to 20 UTF-8 bytes. If ManyChat sends a longer reference, the bridge hashes it to a stable 20-character value and returns that value in the `reference` response field. The callback will use the hashed value.
+
 ## Error codes
 
-The `error_code` returned to ManyChat comes straight from smsoffice. Common values:
+The `error_code` returned to ManyChat comes straight from smsoffice. For bridge-side validation or transport errors, `error_code` is `null` and `error` contains the local reason. Common smsoffice values:
 
 | Code | Meaning |
 |---|---|

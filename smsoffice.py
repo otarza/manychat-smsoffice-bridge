@@ -14,9 +14,6 @@ SMSOFFICE_SEND_URL = "https://smsoffice.ge/api/v2/send/"
 SMSOFFICE_STATUS_URL = "https://smsoffice.ge/api/v2/getMessageStatus/"
 SMSOFFICE_BALANCE_URL = "https://smsoffice.ge/api/getBalance"
 
-# Error codes from smsoffice docs that mean "retry might help"
-TRANSIENT_ERROR_CODES = {-100}
-
 
 class SmsOfficeError(Exception):
     """Raised when smsoffice returns a non-success response."""
@@ -41,7 +38,7 @@ class SmsOfficeClient:
         self,
         api_key: str,
         sender: str,
-        timeout: float = 10.0,
+        timeout: float = 8.0,
         session: Optional[requests.Session] = None,
     ):
         if not api_key:
