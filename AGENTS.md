@@ -11,6 +11,9 @@ make lint       # python -m ruff check .
 make run        # serve send_sms on http://localhost:8080 (requires .env)
 make run-cb     # serve sms_callback on http://localhost:8081
 make deploy     # ./deploy.sh — deploys both Cloud Functions to GCP
+make logs-tail  # watch live send/callback logs
+make logs-results  # show latest send results
+make logs-failures # show latest send failures
 ```
 
 Run a single test file: `python -m pytest tests/test_main.py -v`
@@ -38,6 +41,8 @@ Three source modules, two deployed Cloud Functions:
 **smsoffice `ErrorCode` location:** The API inconsistently places `ErrorCode` at the top level or nested inside `Output`. `SmsOfficeClient.send()` checks both locations.
 
 **Authentication:** `send_sms` checks `X-Auth-Token` against `MANYCHAT_SHARED_SECRET`. The `sms_callback` function has no auth — it must return the literal string `"OK"` per smsoffice docs.
+
+**Logging:** `main.py` emits structured JSON events to stdout. Do not log message content, full phone numbers, API keys, or ManyChat secrets. Use masked destinations and content hashes for broadcast debugging.
 
 ## Deployment
 

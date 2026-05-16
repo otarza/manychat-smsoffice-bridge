@@ -583,7 +583,59 @@ Message rules:
 
 ## 18. Logs And Monitoring
 
-Read send function logs:
+The bridge emits structured JSON logs for broadcast monitoring.
+
+Logged send events:
+
+| Event | Meaning |
+|---|---|
+| `send_request_received` | Authorized ManyChat request was received |
+| `send_validation_failed` | Request could not be sent because input was missing, invalid, or too long |
+| `send_attempt` | Bridge is calling smsoffice |
+| `send_result` | smsoffice returned a parsed result |
+| `send_exception` | Network/non-JSON smsoffice error |
+| `delivery_callback` | smsoffice called the callback URL with delivery status |
+
+Logs intentionally do not include SMS content or full phone numbers. They include:
+
+- `request_id`
+- `reference`
+- `destination_masked`
+- `content_len`
+- `content_hash`
+- `success`
+- `error`
+- `error_code`
+- `message`
+- callback `status`, `reason`, `timestamp`, and `operator`
+
+Watch live logs while sending a broadcast:
+
+```bash
+PROJECT_ID=manychat-smsoffice-bridge-otar REGION=europe-west1 make logs-tail
+```
+
+This uses:
+
+```bash
+gcloud beta logging tail
+```
+
+If `gcloud` asks to install beta components, accept it.
+
+Show latest send results:
+
+```bash
+PROJECT_ID=manychat-smsoffice-bridge-otar REGION=europe-west1 make logs-results
+```
+
+Show latest failures:
+
+```bash
+PROJECT_ID=manychat-smsoffice-bridge-otar REGION=europe-west1 make logs-failures
+```
+
+Read raw send function logs:
 
 ```bash
 gcloud functions logs read send-sms \
@@ -593,7 +645,7 @@ gcloud functions logs read send-sms \
   --limit=50
 ```
 
-Read callback logs:
+Read raw callback logs:
 
 ```bash
 gcloud functions logs read sms-callback \
@@ -609,6 +661,19 @@ Recommended Google Cloud setup:
 - Keep max instances low unless real traffic requires more.
 - Keep minimum instances at zero.
 - Clean up old Artifact Registry images if storage grows.
+
+During a 500-contact broadcast, keep one terminal open with:
+
+```bash
+make logs-tail
+```
+
+And another terminal for summarized results:
+
+```bash
+make logs-results
+make logs-failures
+```
 
 ## 19. Updating The App
 

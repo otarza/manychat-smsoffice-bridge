@@ -1,4 +1,11 @@
-.PHONY: help install test lint run deploy clean
+PROJECT_ID ?= $(shell gcloud config get-value project 2>/dev/null)
+REGION ?= europe-west1
+
+LOG_FILTER_ALL = resource.type="cloud_run_revision" AND (resource.labels.service_name="send-sms" OR resource.labels.service_name="sms-callback")
+LOG_FILTER_SEND_RESULTS = resource.type="cloud_run_revision" AND resource.labels.service_name="send-sms" AND jsonPayload.event="send_result"
+LOG_FILTER_SEND_FAILURES = resource.type="cloud_run_revision" AND resource.labels.service_name="send-sms" AND (jsonPayload.event="send_exception" OR jsonPayload.event="send_validation_failed" OR jsonPayload.success=false)
+
+.PHONY: help install test lint run deploy logs-send logs-callback logs-tail logs-results logs-failures clean
 
 help:
 	@echo "Available commands:"
@@ -8,6 +15,9 @@ help:
 	@echo "  make run       Run send_sms locally on http://localhost:8080"
 	@echo "  make run-cb    Run sms_callback locally on http://localhost:8081"
 	@echo "  make deploy    Deploy both functions to GCP"
+	@echo "  make logs-tail Watch live send/callback logs (requires gcloud beta logging tail)"
+	@echo "  make logs-results Show latest send results"
+	@echo "  make logs-failures Show latest send failures"
 	@echo "  make clean     Remove caches"
 
 install:
@@ -28,6 +38,21 @@ run-cb:
 
 deploy:
 	./deploy.sh
+
+logs-send:
+	gcloud functions logs read send-sms --project="$(PROJECT_ID)" --region="$(REGION)" --gen2 --limit=100
+
+logs-callback:
+	gcloud functions logs read sms-callback --project="$(PROJECT_ID)" --region="$(REGION)" --gen2 --limit=100
+
+logs-tail:
+	gcloud beta logging tail '$(LOG_FILTER_ALL)' --project="$(PROJECT_ID)"
+
+logs-results:
+	gcloud logging read '$(LOG_FILTER_SEND_RESULTS)' --project="$(PROJECT_ID)" --limit=100 --format='table(timestamp,jsonPayload.reference,jsonPayload.destination_masked,jsonPayload.success,jsonPayload.error_code,jsonPayload.message)'
+
+logs-failures:
+	gcloud logging read '$(LOG_FILTER_SEND_FAILURES)' --project="$(PROJECT_ID)" --limit=100 --format='table(timestamp,jsonPayload.event,jsonPayload.reference,jsonPayload.destination_masked,jsonPayload.error,jsonPayload.error_code,jsonPayload.message)'
 
 clean:
 	rm -rf .pytest_cache .ruff_cache __pycache__ tests/__pycache__

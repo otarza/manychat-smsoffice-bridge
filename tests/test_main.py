@@ -121,6 +121,40 @@ class TestSendSms:
         assert kwargs["destination"] == "995577123456"
         assert kwargs["reference"] == "abc"
 
+    def test_happy_path_logs_structured_result_without_content_or_full_phone(
+        self, send_client, capsys
+    ):
+        fake_result = SendResult(
+            success=True, error_code=0, message="queued", raw={}
+        )
+        with patch.object(SmsOfficeClient, "send", return_value=fake_result):
+            r = send_client.post(
+                "/",
+                headers=auth_headers(),
+                data=json.dumps(
+                    {
+                        "phone": "+995577123456",
+                        "content": "secret campaign message",
+                        "reference": "broadcast-1",
+                    }
+                ),
+            )
+
+        assert r.status_code == 200
+        log_lines = [
+            json.loads(line)
+            for line in capsys.readouterr().out.splitlines()
+            if line.startswith("{")
+        ]
+        result_log = next(line for line in log_lines if line["event"] == "send_result")
+        assert result_log["reference"] == "broadcast-1"
+        assert result_log["destination_masked"] == "9955****3456"
+        assert result_log["success"] is True
+        assert result_log["error_code"] == 0
+        serialized_logs = "\n".join(json.dumps(line) for line in log_lines)
+        assert "secret campaign message" not in serialized_logs
+        assert "995577123456" not in serialized_logs
+
     def test_urgent_false_string_stays_false(self, send_client):
         fake_result = SendResult(success=True, error_code=0, message="queued", raw={})
         with patch.object(SmsOfficeClient, "send", return_value=fake_result) as send_mock:
@@ -226,3 +260,32 @@ class TestCallback:
         )
         assert r.status_code == 200
         assert r.data == b"OK"
+
+    def test_logs_delivery_callback_with_masked_destination(
+        self, callback_client, capsys
+    ):
+        r = callback_client.get(
+            "/",
+            query_string={
+                "reference": "abc",
+                "status": "Delivered",
+                "reason": "",
+                "destination": "995577123456",
+                "timestamp": "20260516120000",
+                "operator": "test",
+            },
+        )
+
+        assert r.status_code == 200
+        log_lines = [
+            json.loads(line)
+            for line in capsys.readouterr().out.splitlines()
+            if line.startswith("{")
+        ]
+        callback_log = next(
+            line for line in log_lines if line["event"] == "delivery_callback"
+        )
+        assert callback_log["reference"] == "abc"
+        assert callback_log["status"] == "Delivered"
+        assert callback_log["destination_masked"] == "9955****3456"
+        assert "995577123456" not in json.dumps(callback_log)

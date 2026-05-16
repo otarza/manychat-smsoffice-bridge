@@ -214,6 +214,28 @@ Body:
 
 ManyChat only maps response values reliably when the request returns `200 OK`, so authorized `send_sms` requests return `200` even for validation errors, smsoffice business errors, and smsoffice transport errors. Use `success` as the flow branch condition.
 
+## Broadcast logging
+
+The bridge writes structured JSON logs for each request, validation failure, smsoffice send attempt, send result, transport exception, and delivery callback. Message content and full phone numbers are not logged; logs include content length/hash, reference, masked destination, status, error code, and smsoffice message.
+
+Watch logs live while sending a broadcast:
+
+```bash
+PROJECT_ID=manychat-smsoffice-bridge-otar REGION=europe-west1 make logs-tail
+```
+
+Show latest send results:
+
+```bash
+PROJECT_ID=manychat-smsoffice-bridge-otar REGION=europe-west1 make logs-results
+```
+
+Show latest failures:
+
+```bash
+PROJECT_ID=manychat-smsoffice-bridge-otar REGION=europe-west1 make logs-failures
+```
+
 ## smsoffice callback (delivery receipts)
 
 In your smsoffice.ge profile, set the callback URL to the `sms-callback` function URL from the deploy output. smsoffice will GET it with `reference`, `status`, `destination`, `timestamp`, `operator`. The function logs them to Cloud Logging; to persist them, edit `sms_callback` in `main.py` to write to Firestore / BigQuery / Sheets.
