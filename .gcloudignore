@@ -1,0 +1,27 @@
+# Don't upload these to Cloud Functions deployment
+
+.git/
+.github/
+.gitignore
+.gcloudignore
+
+tests/
+*.test.py
+test_*.py
+
+.venv/
+venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+.env
+.env.local
+.env.example
+
+requirements-dev.txt
+README.md
+LICENSE
+Makefile
+deploy.sh
