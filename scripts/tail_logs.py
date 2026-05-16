@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Tail bridge logs in a compact, human-readable format."""
+"""Poll bridge logs and print a compact, human-readable live view."""
 from __future__ import annotations
 
 import argparse
 import json
 import subprocess
 import sys
+import time
 from datetime import datetime
 
 
@@ -52,6 +53,22 @@ def _clip(value, width: int) -> str:
     return f"{text[: width - 1]}…"
 
 
+def _payload(entry: dict) -> dict:
+    payload = entry.get("jsonPayload")
+    if isinstance(payload, dict):
+        return payload
+
+    text = entry.get("textPayload")
+    if isinstance(text, str) and text.lstrip().startswith("{"):
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+
+    return {}
+
+
 def _event_mark(payload: dict) -> str:
     event = payload.get("event", "")
     success = payload.get("success")
@@ -67,11 +84,10 @@ def _event_mark(payload: dict) -> str:
 
 
 def _format_entry(entry: dict) -> str | None:
-    payload = entry.get("jsonPayload") or {}
+    payload = _payload(entry)
     event = payload.get("event")
     if not event:
-        text_payload = entry.get("textPayload")
-        return f"{_short_time(entry.get('timestamp', ''))} TEXT {text_payload}" if text_payload else None
+        return None
 
     mark = _event_mark(payload)
     reference = payload.get("reference") or "-"
@@ -94,6 +110,14 @@ def _format_entry(entry: dict) -> str | None:
     ).rstrip()
 
 
+def _entry_key(entry: dict) -> tuple:
+    return (
+        entry.get("logName", ""),
+        entry.get("insertId", ""),
+        entry.get("timestamp", ""),
+    )
+
+
 def _print_header() -> None:
     print(
         " ".join(
@@ -113,26 +137,24 @@ def _print_header() -> None:
     print("-" * 180, flush=True)
 
 
-def _iter_json_stream(stream):
-    decoder = json.JSONDecoder()
-    buffer = ""
-    for chunk in iter(lambda: stream.read(1), ""):
-        buffer += chunk
-        stripped = buffer.lstrip()
-        if not stripped:
-            buffer = ""
-            continue
-        try:
-            value, end = decoder.raw_decode(stripped)
-        except json.JSONDecodeError:
-            continue
-        consumed_prefix = len(buffer) - len(stripped)
-        buffer = buffer[consumed_prefix + end :]
-        if isinstance(value, list):
-            for item in value:
-                yield item
-        elif isinstance(value, dict):
-            yield value
+def _read_entries(project: str, mode: str, freshness: str, limit: int) -> list[dict]:
+    command = [
+        "gcloud",
+        "logging",
+        "read",
+        FILTERS[mode],
+        f"--project={project}",
+        f"--freshness={freshness}",
+        f"--limit={limit}",
+        "--format=json",
+    ]
+    result = subprocess.run(command, capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or result.stdout.strip())
+    if not result.stdout.strip():
+        return []
+    parsed = json.loads(result.stdout)
+    return parsed if isinstance(parsed, list) else []
 
 
 def main() -> int:
@@ -145,55 +167,52 @@ def main() -> int:
         help="Which bridge log stream to show.",
     )
     parser.add_argument(
-        "--buffer-window",
-        default="1s",
-        help="gcloud logging tail buffer window.",
+        "--interval",
+        type=float,
+        default=2.0,
+        help="Polling interval in seconds.",
+    )
+    parser.add_argument(
+        "--freshness",
+        default="30m",
+        help="How far back each polling query should look.",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=1000,
+        help="Max log entries to fetch per poll.",
     )
     args = parser.parse_args()
 
-    command = [
-        "gcloud",
-        "beta",
-        "logging",
-        "tail",
-        FILTERS[args.mode],
-        f"--project={args.project}",
-        "--format=json",
-        f"--buffer-window={args.buffer_window}",
-    ]
-
-    print(f"Streaming {args.mode} logs for {args.project}. Press Ctrl-C to stop.")
+    print(
+        f"Polling {args.mode} logs for {args.project} every {args.interval:g}s. "
+        "Press Ctrl-C to stop.",
+        flush=True,
+    )
+    print(f"Showing matching logs from the last {args.freshness}, then new matches.", flush=True)
     _print_header()
 
-    try:
-        process = subprocess.Popen(
-            command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1,
-        )
-    except FileNotFoundError:
-        print("gcloud was not found on PATH.", file=sys.stderr)
-        return 127
-
-    assert process.stdout is not None
-    assert process.stderr is not None
+    seen: set[tuple] = set()
 
     try:
-        for entry in _iter_json_stream(process.stdout):
-            line = _format_entry(entry)
-            if line:
-                print(line, flush=True)
+        while True:
+            entries = _read_entries(args.project, args.mode, args.freshness, args.limit)
+            for entry in reversed(entries):
+                key = _entry_key(entry)
+                if key in seen:
+                    continue
+                seen.add(key)
+                line = _format_entry(entry)
+                if line:
+                    print(line, flush=True)
+            time.sleep(args.interval)
     except KeyboardInterrupt:
-        process.terminate()
-        return 130
-    finally:
-        stderr = process.stderr.read()
-        if stderr:
-            print(stderr, file=sys.stderr, end="")
-
-    return process.wait()
+        print("\nStopped.")
+        return 0
+    except (json.JSONDecodeError, RuntimeError) as exc:
+        print(f"Could not read logs: {exc}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":
