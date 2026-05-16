@@ -2,6 +2,8 @@
 
 A serverless bridge that lets [ManyChat](https://manychat.com) send SMS via [smsoffice.ge](https://smsoffice.ge) — deployed as Google Cloud Functions on the free tier.
 
+For the complete zero-to-production setup, GitHub Actions deployment, and ManyChat usage guide, see [docs/SETUP_AND_MANYCHAT_USAGE.md](docs/SETUP_AND_MANYCHAT_USAGE.md).
+
 ## What it does
 
 ```
@@ -239,7 +241,9 @@ Full list: [smsoffice.ge/integration](https://smsoffice.ge/integration/).
 
 ```
 .
-├── .github/workflows/tests.yml   # CI: lint + pytest on every push
+├── .github/workflows/deploy.yml  # CI/CD: lint, test, deploy on master
+├── .github/workflows/tests.yml   # CI: lint + pytest on pushes / PRs
+├── docs/                         # setup, deployment, and usage guides
 ├── tests/                        # unit + handler tests
 ├── main.py                       # Cloud Functions entry points
 ├── smsoffice.py                  # API client

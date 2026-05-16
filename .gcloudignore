@@ -10,6 +10,7 @@ gha-creds-*.json
 tests/
 *.test.py
 test_*.py
+docs/
 
 .venv/
 venv/
