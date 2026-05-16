@@ -224,7 +224,7 @@ Watch logs live while sending a broadcast:
 PROJECT_ID=manychat-smsoffice-bridge-otar REGION=europe-west1 make logs-tail
 ```
 
-Watch a compact live broadcast table:
+Watch a compact live broadcast table. This uses `scripts/tail_logs.py` to parse the live `gcloud` stream and print readable rows:
 
 ```bash
 PROJECT_ID=manychat-smsoffice-bridge-otar REGION=europe-west1 make logs-broadcast-tail

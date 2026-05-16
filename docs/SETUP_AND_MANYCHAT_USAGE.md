@@ -615,7 +615,7 @@ Watch live logs while sending a broadcast:
 PROJECT_ID=manychat-smsoffice-bridge-otar REGION=europe-west1 make logs-tail
 ```
 
-The raw JSON live tail is complete, but it can be noisy. For live broadcast monitoring, this compact table is easier to read:
+The raw JSON live tail is complete, but it can be noisy. For live broadcast monitoring, this compact table is easier to read. It uses `scripts/tail_logs.py` to parse the live `gcloud` JSON stream and print one readable row per event:
 
 ```bash
 PROJECT_ID=manychat-smsoffice-bridge-otar REGION=europe-west1 make logs-broadcast-tail

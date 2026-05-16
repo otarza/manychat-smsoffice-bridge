@@ -4,11 +4,8 @@ REGION ?= europe-west1
 LOG_FILTER_ALL = resource.type="cloud_run_revision" AND (resource.labels.service_name="send-sms" OR resource.labels.service_name="sms-callback")
 LOG_FILTER_SEND_RESULTS = resource.type="cloud_run_revision" AND resource.labels.service_name="send-sms" AND jsonPayload.event="send_result"
 LOG_FILTER_SEND_FAILURES = resource.type="cloud_run_revision" AND resource.labels.service_name="send-sms" AND (jsonPayload.event="send_exception" OR jsonPayload.event="send_validation_failed" OR jsonPayload.success=false)
-LOG_FILTER_BROADCAST = resource.type="cloud_run_revision" AND ((resource.labels.service_name="send-sms" AND (jsonPayload.event="send_result" OR jsonPayload.event="send_exception" OR jsonPayload.event="send_validation_failed")) OR (resource.labels.service_name="sms-callback" AND jsonPayload.event="delivery_callback"))
-
 LOG_FORMAT_RESULTS = table(timestamp,jsonPayload.reference,jsonPayload.destination_masked,jsonPayload.success,jsonPayload.error_code,jsonPayload.message)
 LOG_FORMAT_FAILURES = table(timestamp,jsonPayload.event,jsonPayload.reference,jsonPayload.destination_masked,jsonPayload.error,jsonPayload.error_code,jsonPayload.message)
-LOG_FORMAT_BROADCAST = table(timestamp,resource.labels.service_name,jsonPayload.event,jsonPayload.reference,jsonPayload.destination_masked,jsonPayload.success,jsonPayload.error_code,jsonPayload.status,jsonPayload.message,jsonPayload.error)
 
 .PHONY: help install test lint run deploy logs-send logs-callback logs-tail logs-broadcast-tail logs-results-tail logs-failures-tail logs-results logs-failures clean
 
@@ -57,13 +54,13 @@ logs-tail:
 	gcloud beta logging tail '$(LOG_FILTER_ALL)' --project="$(PROJECT_ID)"
 
 logs-broadcast-tail:
-	gcloud beta logging tail '$(LOG_FILTER_BROADCAST)' --project="$(PROJECT_ID)" --format='$(LOG_FORMAT_BROADCAST)'
+	python scripts/tail_logs.py --project="$(PROJECT_ID)" --mode=broadcast
 
 logs-results-tail:
-	gcloud beta logging tail '$(LOG_FILTER_SEND_RESULTS)' --project="$(PROJECT_ID)" --format='$(LOG_FORMAT_RESULTS)'
+	python scripts/tail_logs.py --project="$(PROJECT_ID)" --mode=results
 
 logs-failures-tail:
-	gcloud beta logging tail '$(LOG_FILTER_SEND_FAILURES)' --project="$(PROJECT_ID)" --format='$(LOG_FORMAT_FAILURES)'
+	python scripts/tail_logs.py --project="$(PROJECT_ID)" --mode=failures
 
 logs-results:
 	gcloud logging read '$(LOG_FILTER_SEND_RESULTS)' --project="$(PROJECT_ID)" --limit=100 --format='$(LOG_FORMAT_RESULTS)'
